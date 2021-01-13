@@ -49,7 +49,7 @@ app.post('/api/exercise/new-user', async (req, res) => {
     const { username } = req.body;
     const newUser = new Ex({ username });
     const n = await newUser.save();
-    res.json({ username: n.username, id: n._id });
+    res.json({ username: n.username, _id: n._id });
 });
 
 app.get('/api/exercise/users', async (req, res) => {
@@ -61,36 +61,66 @@ app.get('/api/exercise/users', async (req, res) => {
 });
 
 app.post('/api/exercise/add', async (req, res) => {
-    const { id, description, duration, date } = req.body;
+    const { userId, description, duration, date } = req.body;
     const logEntry = {
         description,
         duration,
-        date: date || new Date(),
+        date: date ? new Date(date) : new Date(),
     };
-    const result = await Ex.updateOne(
-        { _id: id },
-        { $push: { log: logEntry } }
-    );
-    res.json(result);
+
+    try {
+        await Ex.updateOne(
+            { _id: userId },
+            { $push: { log: logEntry } },
+            { runValidators: true }
+        );
+        const user = await Ex.findById(userId);
+        const output = {
+            _id: user._id,
+            username: user.username,
+            date: logEntry.date.toDateString(),
+            duration: Number(duration),
+            description,
+        };
+        res.json(output);
+    } catch (error) {
+        console.error(error);
+        res.json({ error: 'bad format' });
+    }
 });
 
-app.get('/api/exercise/log', (req, res) => {
+app.get('/api/exercise/log', async (req, res) => {
     const { userId, from, to, limit } = req.query;
+    const user = await Ex.findById(userId).lean();
     const queryObj = {
-        _id: userId,
-        from,
-        to,
-        limit,
+        userId,
+        from: from ? Date.parse(from) : Date.parse('1900-01-01'),
+        to: to ? Date.parse(to) : Date.now(),
+        limit: limit ? limit : user.log.length,
     };
-    console.log(queryObj);
-
-    res.json(queryObj);
+    const logsToShow = user.log
+        .filter(
+            log =>
+                Date.parse(log.date) > queryObj.from &&
+                Date.parse(log.date) < queryObj.to
+        )
+        .slice(0, limit)
+        .map(log => {
+            return {
+                description: log.description,
+                duration: log.duration,
+                date: log.date.toDateString(),
+            };
+        });
+    const outputObj = {
+        _id: userId,
+        username: user.username,
+        count: logsToShow.length,
+        log: logsToShow,
+    };
+    res.json(outputObj);
 });
 
 const listener = app.listen(process.env.PORT || 3000, () => {
     console.log('Your app is listening on port ' + listener.address().port);
 });
-
-// http://localhost:3000/api/exercise/log?userId=5fff0060ddb90ee714021b59&from=2020-01-01&to=2020-02-02&limit=2
-
-// on live 5ffef77d0aa40e05f2b89265
